@@ -1,0 +1,58 @@
+#####################################################################################
+#
+# Playbook to restart nodes in Cassandra clusters in rolling fashion.
+#
+# How to executue:
+# ansible-playbook playbook_rolling_restart.yml -i inventory
+#
+#####################################################################################
+
+---
+
+- name: "Cassandra | Playbook to restart Cassandra nodes in rolling fashion"
+  hosts: cassandra
+  become: true
+  serial: 1
+
+  tasks:
+
+    - name: "Cassandra | Validating cluster health"
+      shell: "nodetool status | grep UN | awk '{ print $1; }' | wc -l && sleep 10"
+      register: _pre_cluster_status
+
+    - name: "Cassandra | Demoting the node from coordinator role"
+      shell: "nodetool disablethrift && sleep 10"
+      register: _thrift_status
+      when: _pre_cluster_status.stdout == "3"
+
+    - name: "Cassandra | Disabling native transport"
+      shell: "nodetool disablebinary && sleep 10"
+      register: _binary_status
+      when: _thrift_status.stderr == ""
+
+    - name: "Cassandra | Disabling gossip"
+      shell: "nodetool disablegossip && sleep 10"
+      register: _gossip_status
+      when: _binary_status.stderr == ""
+
+    - name: "Cassandra | Flushing data from memory to disk"
+      shell: "nodetool drain && sleep 10"
+      register: _drain_status
+      when: _gossip_status.stderr == ""
+
+    - name: "Cassandra | Restarting cassandra service"
+      service:
+        name: cassandra
+        state: restarted
+        enabled: yes
+      when:
+        - _pre_cluster_status.stdout == "3"
+        - _drain_status.stderr == ""
+
+    - name: "Cassandra | Validating if Cassandra service is back online"
+      shell: "nodetool status | grep UN | awk '{ print $1; }' | wc -l"
+      register: _post_cluster_status
+      until: _post_cluster_status.stdout == "3"
+      retries: 60
+      delay: 10
+      ignore_errors: yes

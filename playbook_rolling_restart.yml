@@ -1,3 +1,12 @@
+#####################################################################################
+#
+# Playbook to restart nodes in Cassandra clusters in rolling fashion.
+#
+# How to executue:
+# ansible-playbook -i inventory playbook-dbs-cassandra-rolling-restart.yml
+#
+#####################################################################################
+
 ---
 
 - name: "Cassandra | Playbook to restart Cassandra nodes in rolling fashion"
@@ -8,28 +17,64 @@
   tasks:
 
     - name: "Cassandra | Validating cluster health"
-      shell: "nodetool status | grep UN | awk '{ print $1; }' | wc -l && sleep 10"
+      shell: set -o pipefail && nodetool status | grep UN | awk '{ print $1; }' | wc -l && sleep 10
       register: _pre_cluster_status
+      changed_when: false
+      failed_when: _pre_cluster_status.stdout != "3"
+
+    - name: "Cassandra | Debug _pre_cluster_status"
+      debug:
+        var: _pre_cluster_status.stdout
+
+    - name: "Cassandra | Checking if backup is inprogress"
+      shell: set -o pipefail && ps -ef | grep -v grep | grep -w snapshot | awk '{print $2}'
+      register: _backup_status
+      changed_when: false
+      failed_when: _backup_status.stdout != ""
+
+    - name: "Cassandra | Debug _backup_status"
+      debug:
+        var: _backup_status.stdout
 
     - name: "Cassandra | Demoting the node from coordinator role"
-      shell: "nodetool disablethrift && sleep 10"
+      shell: set -o pipefail && nodetool disablethrift && sleep 10
       register: _thrift_status
       when: _pre_cluster_status.stdout == "3"
+      changed_when: false
+
+    - name: "Cassandra | Debug _thrift_status"
+      debug:
+        var: _thrift_status.stdout
 
     - name: "Cassandra | Disabling native transport"
-      shell: "nodetool disablebinary && sleep 10"
+      shell: set -o pipefail && nodetool disablebinary && sleep 10
       register: _binary_status
-      when: _thrift_status.stderr == ""
+      when: _pre_cluster_status.stdout == "3"
+      changed_when: false
+
+    - name: "Cassandra | Debug _binary_status"
+      debug:
+        var: _binary_status.stdout
 
     - name: "Cassandra | Disabling gossip"
-      shell: "nodetool disablegossip && sleep 10"
+      shell: set -o pipefail && nodetool disablegossip && sleep 10
       register: _gossip_status
-      when: _binary_status.stderr == ""
+      when: _pre_cluster_status.stdout == "3"
+      changed_when: false
+
+    - name: "Cassandra | Debug _pre_cluster_status"
+      debug:
+        var: _gossip_status.stdout
 
     - name: "Cassandra | Flushing data from memory to disk"
-      shell: "nodetool drain && sleep 10"
+      shell: set -o pipefail && nodetool drain && sleep 10
       register: _drain_status
-      when: _gossip_status.stderr == ""
+      when: _pre_cluster_status.stdout == "3"
+      changed_when: false
+
+    - name: "Cassandra | Debug _pre_cluster_status"
+      debug:
+        var: _drain_status.stdout
 
     - name: "Cassandra | Restarting cassandra service"
       service:
@@ -39,11 +84,13 @@
       when:
         - _pre_cluster_status.stdout == "3"
         - _drain_status.stderr == ""
+      changed_when: false
 
     - name: "Cassandra | Validating if Cassandra service is back online"
-      shell: "nodetool status | grep UN | awk '{ print $1; }' | wc -l"
+      shell: set -o pipefail && nodetool status | grep UN | awk '{ print $1; }' | wc -l
       register: _post_cluster_status
       until: _post_cluster_status.stdout == "3"
       retries: 60
       delay: 10
-      ignore_errors: yes
+      ignore_errors: true
+      changed_when: false

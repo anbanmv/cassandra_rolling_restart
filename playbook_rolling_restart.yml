@@ -3,7 +3,7 @@
 # Playbook to restart nodes in Cassandra clusters in rolling fashion.
 #
 # How to executue:
-# ansible-playbook -i inventory playbook-dbs-cassandra-rolling-restart.yml
+# ansible-playbook -i inventory playbook-cassandra-rolling-restart.yml
 #
 #####################################################################################
 
